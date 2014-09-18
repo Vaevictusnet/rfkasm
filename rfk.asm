@@ -31,12 +31,18 @@ rng5 .rs 1; random number generator output
 rng6 .rs 1; random number generator output
 rng7 .rs 1; random number generator output
 rng8 .rs 1; temp byte for rng manipulation
+checkx  .rs 1 ; x position for movement checking
+checky  .rs 1 ; y position for movement checking
+founditem .rs 1 ; nki/kitten id bumped into
+tmpx .rs 1; nki checking storage
+tmpy .rs 1; nki checking storage
 
 
 ;; DECLARE SOME CONSTANTS HERE
 STATETITLE     = $00  ; displaying title screen
 STATEPLAYING   = $01  ; move paddles/ball, check for collisions
 STATEGAMEOVER  = $02  ; displaying game over screen
+MOVEDELAY  = $08  ; NMI between moves
 
 ; Button codes and combinations
 BUTRIGHT  =$1 
@@ -55,7 +61,7 @@ BUTA      =$80
 
   .bank 0
   
-  	.org $0010
+  	.org $0040
 addrLO:	.db 0  ; make "variable"s for our indirect addressing
 addrHI: .db 0
 
@@ -119,7 +125,24 @@ LoadPalettesLoop:
 
 
 ;;;Set some initial ball stats
-
+  ; seed rng
+  LDA #$69
+  STA rng0
+  LDA #$00
+  STA rng1
+  LDA #$34
+  STA rng2
+  LDA #$56
+  STA rng3
+  LDA #$78
+  STA rng4
+  LDA #$9A
+  STA rng5
+  LDA #$BC
+  STA rng6
+  LDA #$DF
+  STA rng7
+  
 
 ;;:Set starting game state
   LDA #STATETITLE
@@ -145,6 +168,7 @@ NMI:
   STA $2003       ; set the low byte (00) of the RAM address
   LDA #$02
   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
+  JSR random_number ; for randomness
 
   ;;This is the PPU clean up section, so rendering the next frame starts properly.
   ;LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
@@ -156,6 +180,7 @@ NMI:
   ;STA $2005
     
   ;;;all graphics updates done by here, run game engine
+
 
 
   JSR ReadController1  ;;get the current button data for player 1
@@ -172,7 +197,7 @@ GameEngine:
   CMP #STATEGAMEOVER
   BNE dj1
   JMP EngineGameOver  ;;game is displaying ending screen
-  dj1:
+dj1:
   
   LDA gamestate
   CMP #STATEPLAYING
@@ -247,28 +272,13 @@ DoneDisp:
   LDA #STATEPLAYING
   STA gamestate
     ; seed rng
-  LDA nmicounter
-  STA rng0
-  LDA #$00
-  STA rng1
-  LDA #$34
-  STA rng2
-  LDA #$56
-  STA rng3
-  LDA #$78
-  STA rng4
-  LDA #$9A
-  STA rng5
-  LDA #$BC
-  STA rng6
-  LDA #$DF
-  STA rng7
+  ;LDA nmicounter
   
   JSR clear_screen
   JSR SpriteSetup
   JMP GameEngineDone
   
-  NoStart:
+NoStart:
   LDA buttons1
   AND #BUTUP
   BEQ NoUp
@@ -281,9 +291,9 @@ DoneDisp:
   BNE notmax
   LDA #$3F
   STA nkis
-  notmax:
+notmax:
   
-  NoUp:
+NoUp:
   LDA buttons1
   AND #BUTDOWN
   BEQ NoDown
@@ -296,9 +306,9 @@ DoneDisp:
   BNE notmin
   LDA #$01
   STA nkis
-  notmin:
+notmin:
   
-  NoDown:
+NoDown:
 
   LDX #$00
   STX nkiones ; Blank out ones temp
@@ -363,94 +373,229 @@ EngineGameOver:
 ;;;;;;;;;;;
  
 EnginePlaying:
+  ; mark current position
+  LDA $0200
+  STA checky
+  LDA $0203
+  STA checkx
+
+
+;-------------------UP--------------------------
   LDA buttons1
   AND #BUTUP
   BEQ NoRUp
   LDA lockup
-  CMP #$01
-  BEQ NoRUpLocked
+  CMP #0
+  BNE NoRUpLocked
 
   LDA $0200
-  CMP #$27
-  BEQ NoRUpLocked
+;  CMP #$27
+;  BEQ NoRUpLocked
   SEC
   SBC #$08
-  STA $0200
-  LDA #$01
+; A contains destination y
+  STA checky
+
+;  STA $0200
+  LDA #MOVEDELAY
   STA lockup
-  JMP GameEngineDone
+  JMP NoRUpLocked
 NoRUp:
   LDA #$00
   STA lockup
+  JMP RDown
 NoRUpLocked:
+  LDA lockup
+  SEC
+  SBC #1
+  STA lockup
 
+;-------------------DOWN------------------------
+RDown:
   LDA buttons1
   AND #BUTDOWN
   BEQ NoRDown
   LDA lockdown
-  CMP #$01
-  BEQ NoRDownLocked
+  CMP #0
+  BNE NoRDownLocked
  
   LDA $0200
-  CMP #$DF
-  BEQ NoRDownLocked
+;  CMP #$DF
+;  BEQ NoRDownLocked
   CLC
   ADC #$08
-  STA $0200
-  LDA #$01
+; A contains destination y
+  STA checky
+
+;  STA $0200
+  LDA #MOVEDELAY
   STA lockdown
-  JMP GameEngineDone
+  JMP NoRDownLocked
+;  JMP GameEngineDone
 NoRDown:
   LDA #$00
   STA lockdown  
+  JMP RRight
 NoRDownLocked:
+  LDA lockdown
+  SEC
+  SBC #1
+  STA lockdown
+;-------------------RIGHT-----------------------
   
+RRight:
   LDA buttons1
   AND #BUTRIGHT
   BEQ NoRRight
   LDA lockright
-  CMP #$01
-  BEQ NoRRightLocked
+  CMP #0
+  BNE NoRRightLocked
 
   LDA  $0203
-  CMP #$F8
-  BEQ NoRRightLocked
+;  CMP #$F8
+;  BEQ NoRRightLocked
   CLC
   ADC #$08
-  STA $0203
-  LDA #$01
+  STA checkx
+;  STA $0203
+  LDA #MOVEDELAY
   STA lockright
-  JMP GameEngineDone
+;  JMP GameEngineDone
+  JMP NoRRightLocked
 NoRRight:
   LDA #$00
   STA lockright
-  
+  JMP RLeft 
 NoRRightLocked:
+  LDA lockright
+  SEC
+  SBC #1
+  STA lockright
+;-------------------LEFT------------------------
 
+RLeft:
   LDA buttons1
   AND #BUTLEFT
   BEQ NoRLeft
   LDA lockleft
-  CMP #$01
-  BEQ NoRLeftLocked
+  CMP #0
+  BNE NoRLeftLocked
   LDA $0203
-  CMP #$00
-  BEQ NoRLeftLocked
+;  CMP #$00
+;  BEQ NoRLeftLocked
   SEC
   SBC #$08
-  STA $0203
-  LDA #$01
+  STA checkx
+;  STA $0203
+  LDA #MOVEDELAY
   STA lockleft
-  JMP GameEngineDone
+;  JMP GameEngineDone
+  JMP NoRLeftLocked
 NoRLeft:
   LDA #$00
   STA lockleft
+  JMP RChecks
 NoRLeftLocked:
+  LDA lockleft
+  SEC
+  SBC #1
+  STA lockleft
   
+
+
+RChecks:
+
+  LDA checkx
+  CMP $0203
+  BNE CheckControls
+  LDA checky
+  CMP $0200
+  BNE CheckControls
+  JMP EndControls
   
-  
+CheckControls:
+  JSR CheckBoundsAndCollisions
+
+EndControls:
   JMP GameEngineDone
+
+CheckBoundsAndCollisions:
+  ; Lower Bounds
+  LDA checkx
+  CMP #0 ; x minimum
+  BEQ CBACCchecky ; on the line is in
+  BCC EndOfCheckBounds ; not possible when xmin is 0
+
+CBACCchecky:
+  LDA checky
+  CMP #1
+  BEQ CBACCcheckupy
+  BCC EndOfCheckBounds
+
+
+CBACCcheckupy:
+  ; UpperBounds
+  CMP #$D9
+  BEQ CBACCcheckupx
+  BCS EndOfCheckBounds
+CBACCcheckupx:
+  LDA checkx
+  CMP #$F8
+  BEQ CBACCLoopSetup
+  BCS EndOfCheckBounds
+CBACCLoopSetup:
+  ; Collisions
+  LDX #0 ; compare vs nkis
+  LDY #0 ; increases by 4 per nki loop
+CBACCLoop:
+  ; loop through all nkis, checking y then x and bailing with a double match.
+  CPX nkis
+  BEQ CheckedOutCanMove
+  LDA checky
+  CMP $0204,y
+  BEQ CBACCyMatch
+  JMP CBACCNoMatch
+CBACCyMatch:
+  LDA checkx
+  CMP $0207,y
+  BEQ FoundMatch
+CBACCNoMatch:
+  ;doesn't match, increment and loop
+  INX
+  INY
+  INY
+  INY
+  INY
+  JMP CBACCLoop
+FoundMatch:
+  ; X = item which might be kitten
+  STX founditem 
+  JMP HandleItem
+CheckedOutCanMove:
+  ; move robot here, to checkx,checky
+  LDA checky
+  STA $0200
+  LDA checkx
+  STA $0203
+EndOfCheckBounds:
+  RTS
  
+
+HandleItem:
+  ; display message correlating with X register'd item
+
+  
+
+  LDA founditem
+  CMP #0 ; kitten!
+  BEQ GameOver
+
+  RTS
+
+GameOver:
+  LDA #STATEGAMEOVER
+  STA gamestate
+  JMP GameOver ; forever FIXME
  
  
  
@@ -524,21 +669,33 @@ clrloop:
 ;;;;;;;;;;;;;;  
 
 SpriteSetup:
+  jsr turn_screen_off
   CLC
 roby:
   JSR random_number
+  AND #$F8 ; (multiples of 8)
+  ;AND #$38 ; (for testing)
   STA $0200
-  CMP #$17
-  BCS roby
-  LDX #$07
-ymult:
-  ADC $0200
-  DEX
-  CPX #$00
-  BNE ymult
-  ADC #$28
+;  LDA #$1 ; --n8TEST
+;  AND #$1f ; reduce random bits to 0-31
+;  AND #$7 ; --n8TEST
+;  STA $0200
+;  CMP #$17
+;  BCS roby
+;  LDX #$07
+;ymult:
+;  ADC $0200
+;  DEX
+;  CPX #$00
+;  BNE ymult
+;  ROL $0200
+;  ROL $0200
+;  ROL $0200
+
+  ;ADC #$28
+  CLC
+  ADC #1 ; y offset
   STA $0200
-  
   
   LDA #$B0
   STA $0201
@@ -548,18 +705,25 @@ ymult:
   
 robx:
   JSR random_number
+  AND #$F8 ; reduce random bits to 0-31
   STA $0203
-  CMP #$17
-  BCS robx
+  ;CMP #$1f ; n8-- = xmax? was $17 (ymax?)
+  ;BCS robx
   
-  LDX #$07
-xmult:
-  ADC $0203
-  DEX
-  CPX #$00
-  BNE xmult
-  SBC #$0E
-  STA $0203
+;  LDX #$07
+;xmult:
+;  ADC $0203
+;  DEX
+;  CPX #$00
+;  BNE xmult
+;  ROL $0203
+;  ROL $0203
+;  ROL $0203
+
+  ;SBC #$0E
+  ;CLC
+  ;ADC #2 ; x adjustment
+  ;STA $0203
   
   
   LDX #$00
@@ -571,53 +735,109 @@ RandSpritesLoop:
 nkiy:
   CLC
   JSR random_number
-  AND #$1F
-  ;CMP #$17
-  ;BCS nkiy
+  ;STA $0164,x -- debug logging in memory
+  AND #$F8 ; (multiples of 8)
+  ;STA $0165,x -- debug logging in memory
+  CLC
+  ADC #$21 ; Y-offset 1 pixel + one tile width (drawing from the bottom left) + 3 tile widths for info
+  BCS nkiy ; -- >FF is a rejection; could handle here or earlier with another CMP
+  CMP #$DF ; limit to usable tiles (y cutoff)
+  BCS nkiy
   
-  STA $0204,x
-  
-  STY multtemp
-  LDY #$07
-nkiymult:
-  ADC $0204,x
-  DEY
-  CPY #$00
-  BNE nkiymult
-  LDY multtemp
-  STA $0204,x
-  INX
-  LDA #$04
-  STA $0204,x
-  INX
-  LDA #$00
-  STA $0204,x
-  INX
+  STA $0204,x ; y coord
+nkiTile:
+  JSR random_number
+  AND #$7F
+  BEQ nkiTile ; no zeros
+  CMP #$03
+  BNE nkiTileRow
+  CLC
+  ADC #1 ; fix #'s to $'s
+nkiTileRow:
+  STA $0205,x ; tile number
+  AND #$70 
+  CMP #$70 ; make row 7 row 6
+  BNE nkiGotTile
+  LDA $0205,x
+  AND #$6F
+  STA $0205,x ; tile number
+nkiGotTile:  
+  JSR random_number
+  ;LDA #$00
+  AND #03 ; random palette
+  STA $0206,x ; attributes
 nkix:
   CLC
   JSR random_number
-  AND #$1F
-  ;CMP #$20
+  SEC
+  SBC #1 ; range should really be 0-254 than 1-255
+  
+  STA $0160,x ; debug
+  AND #$F8
+  STA $0161,x ; debug
+  ;CLC
+  ;ADC #$1 ;  one pixel
+  ;STA $0162,x ; debug
   ;BCS nkix
-  
-  STA $0204,x
+  CMP #$F1 ; x cutoff
+  BEQ nkix0 
+  BCS nkix
+nkix0:
 
-  
-  STY multtemp
-  LDY #$07
-nkixmult:
-  ADC $0204,x
-  DEY
-  CPY #$00
-  BNE nkixmult
-  LDY multtemp
-  STA $0204,x
+  STA $0207,x ; x coordinate
+  JSR nkiAvoidOverlap
+  BCS RandSpritesLoop ; overwrite current nki, no increments
 
+nkiNextnki:
+  TXA
+  CLC
+  ADC #4 ; increment X by 4
+  TAX
+  
   INY
-  INX
   CPY nkis
   BNE RandSpritesLoop
+  JSR turn_screen_on
   RTS
+
+nkiAvoidOverlap:
+  ; save x and y
+  STX tmpx
+  STY tmpy ; holds current nki to compare
+  LDY tmpx ; current offset
+nkiOverlapLoop:
+  ; X is offset from 0204 to current
+  ; current to previous is 0200,x
+  ; decrementing to robot @ 0200,x=0 will bail loop
+
+  LDA $0200,x
+  CMP $0204,y
+  BNE nkiOverlapNextLoop
+  LDA $0203,x
+  CMP $0207,y
+  BEQ nkiOverlapFound
+  
+
+nkiOverlapNextLoop:
+  ; decrement X by 4
+  TXA
+  SEC
+  SBC #4
+  ;BEQ nkiOverlapNotFound ; disabled to check against robot
+  BCC nkiOverlapNotFound
+  TAX
+  JMP nkiOverlapLoop
+
+nkiOverlapNotFound:
+  CLC ; carry bit is the return value
+  JMP nkiOverlapEnd
+nkiOverlapFound:
+  SEC ; carry bit is the return value
+nkiOverlapEnd:
+  LDX tmpx
+  LDY tmpy
+  RTS
+  
 
 ;random_number:
 ;  LDA #$AF
